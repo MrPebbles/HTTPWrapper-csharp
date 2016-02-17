@@ -10,7 +10,7 @@ PairedData.cs - Used to organize POST and cookies data<br>
 Example Usage<br>
 
 /***Creating the object***/
-HTTPWrapper http = new HTTPWrapper(new Cookies());
+HTTPWrapper http = new HTTPWrapper(new Cookie());
 
 /****Using GET****/
 
@@ -43,6 +43,6 @@ Cookie myCookie = new Cookie();
 HTTPWrapper http_1 = new HTTPWrapper(myCookie); 
 HTTPWrapper http_2 = new HTTPWrapper(myCookie); 
 //...etc
-//This way if http_1 logs into the website, then http_2 will also be able to access it. Btw, the Cookie object is threadsafe.
+//This way if http_1 logs into the website, then http_2 will also be able to access it. Btw, the Cookie object is threadsafe,so you can have http_1 and http_2 working in thier own threads while sharing the same cookie.
 
 
