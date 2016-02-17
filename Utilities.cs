@@ -6,7 +6,7 @@ using System.Windows.Forms;
 
 namespace BlueShift
 {
-    static public class Utilities
+    static class Utilities
     {
         static int last_index = 0;
 
@@ -23,31 +23,16 @@ namespace BlueShift
             return rand.Next(min, max);
         }
 
-        static public string KVPToStr(Dictionary<string, string> data)
-        {
-            string output = "";
-            bool first_flag = true;
-            foreach(KeyValuePair<string, string> tmp in data)
-            {
-                if (first_flag)
-                    output += tmp.Key + "=" + UrlEncode(tmp.Value);
-                else
-                    output += "&" + tmp.Key + "=" + UrlEncode(tmp.Value);
-                first_flag = false;
-            }
-            return output;
-        }
-
         static public int Fast_IndexOf(char[] str, int offset, char[] search)
         {
             bool found = false;
             int index = offset;
-            int str_length = str.Length;
-            int search_length = search.Length;
+            int strLength = str.Length;
+            int searchLength = search.Length;
 
-            while (index < str_length)
+            while (index < strLength)
             {
-                for (int x = 0; x < search_length; x++)
+                for (int x = 0; x < searchLength; x++)
                     if (str[index + x] != search[x])
                     {
                         found = false;
@@ -184,31 +169,6 @@ namespace BlueShift
                 return false;
             else
                 return true;
-        }
-
-        static public string UrlEncode(string str)
-        {
-            return System.Web.HttpUtility.UrlEncode(str);
-        }
-
-        static public void CaptureError(Exception ex, HTTPWrapper Http, Global Options)
-        {
-            try
-            {
-                System.Diagnostics.StackTrace Trace = new System.Diagnostics.StackTrace(ex, true);
-                StreamWriter sw = new StreamWriter("ErrorDump.txt");
-
-                sw.WriteLine(String.Format("Exception: {0}\n{1}\n\n", ex.Message, Trace.ToString()));
-                sw.Close();
-
-                MessageBox.Show("The application encountered an error and will terminate shortly."
-                    + "\nAll debugging information has been dumped into \"ErrorDump.txt\"", "Fatal Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Stop);
-            }
-            catch
-            {
-                Application.Exit();
-            }
         }
 
     }

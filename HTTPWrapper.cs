@@ -9,99 +9,125 @@ using System.Threading;
 
 namespace BlueShift
 {
-     public class HTTPWrapper
+    class HTTPWrapper
     {
-        public event HTTPEventListener NewDataArrived;
+        private const int DEFAULT_RETRIES = 5;
+        private const int MIN_RETRIES = 0;
+        private const int MAX_RETRIES = 10;
 
-        public bool UseGZip = true;
-        public bool UseProxy = false;
-        public string ProxyServer;
-        public string ProxyPort;
-        public string ProxyUsername;
-        public string ProxyPassword;
+        private const int DEFAULT_TIMEOUT = 10000;
 
-        public struct Last_Request
-        {
-            public string Url;
-            public string RequestType;
-            public string Data;
-            public string Referer;
-            public string DataSent;
-            public string HeaderReceived;
-            public string BodyRecieved;
+        public bool UseGZip;
+        public bool UseProxy;
+
+        private LastRequest lastReq;
+        private Cookie cookies;
+
+        private string proxyServer;
+        private int proxyPort;
+        private string proxyUsername;
+        private string proxyPassword;
+
+        private int retries;
+
+
+        public HTTPWrapper(Cookie sharedCookie) {
+            UseGZip = true;
+            UseProxy = false;
+            lastReq = new LastRequest();
+            cookies = sharedCookie;
+            retries = DEFAULT_RETRIES; 
         }
 
-        public Last_Request LastRequest = new Last_Request();
-        public Dictionary<string, string> Cookies = new Dictionary<string, string>();
-        
-        public string GET(string Url)
+        public void setProxy(string server, int port, string username, string password)
         {
-            return Navigate("GET", Url, "", null, true);
+            proxyServer = server;
+            proxyPort = port;
+            proxyUsername = username;
+            proxyPassword = password;
         }
 
-        public string GET(string Url, string Referer)
+        public int Retries
         {
-            return Navigate("GET", Url, "", Referer, true);
+            get { return retries; }
+            set {
+                if (value < MIN_RETRIES)
+                    retries = MIN_RETRIES;
+                else if (value > MAX_RETRIES)
+                    retries = MAX_RETRIES;
+                else
+                    retries = value;
+            }
         }
 
-        public string POST(string Url, Dictionary<string, string> pData)
+        public string GET(string url)
         {
-            return Navigate("POST", Url, Utilities.KVPToStr(pData), null, true);
+            return Navigate("GET", url, "", null, true);
         }
 
-        public string POST(string Url, Dictionary<string, string> pData, string Referer)
+        public string GET(string url, string referer)
         {
-            return Navigate("POST", Url, Utilities.KVPToStr(pData), Referer, true);
+            return Navigate("GET", url, "", referer, true);
         }
 
-        public string POST(string Url, string pData, string Referer)
+        public string POST(string url, PairedData pData)
         {
-            return Navigate("POST", Url, pData, Referer, true);
+            return Navigate("POST", url, pData.ToPOSTStr(), null, true);
         }
 
-        public string POST(string Url, string pData)
+        public string POST(string url, PairedData pData, string referer)
         {
-            return Navigate("POST", Url, pData, null, true);
+            return Navigate("POST", url, pData.ToPOSTStr(), referer, true);
         }
 
-        public System.Drawing.Bitmap GetImage(string Url, string Referer)
+        public string POST(string url, string pData, string referer)
         {
-            string source = Navigate("GET", Url, "", Referer, false);
+            return Navigate("POST", url, pData, referer, true);
+        }
+
+        public string POST(string url, string pData)
+        {
+            return Navigate("POST", url, pData, null, true);
+        }
+
+        public System.Drawing.Bitmap GetImage(string url, string referer)
+        {
+            string source = Navigate("GET", url, "", referer, false);
             MemoryStream mStream = new MemoryStream(Encoding.Default.GetBytes(source));
             return new System.Drawing.Bitmap(mStream);
         }
 
         public string Refresh()
         {
-            return Navigate(LastRequest.RequestType, LastRequest.Url, LastRequest.Data, LastRequest.Referer, true);
+            return Navigate(lastReq.RequestType, lastReq.Url, lastReq.Data, lastReq.Referer, true);
         }
 
-        string Navigate(string Request, string Url, string Data, string Referer, bool ReturnHeader)
+        private string Navigate(string request, string url, string pData, string referer, bool returnHeader)
         {
-            string Raw_Html, Server, Page;
-            int Retry = 3;
+            string rawHTML, server, page;
+            int retriesLeft = retries;
 
             //Get the referer if nothing's provided
-            if ((Referer == null) || (Referer == ""))
-                if (LastRequest.RequestType == "POST")
-                    Referer = LastRequest.Url + "?" + LastRequest.Data;
+            if ((referer == null) || (referer == ""))
+                if (lastReq.RequestType == "POST")
+                    referer = lastReq.Url + "?" + lastReq.Data;
                 else
-                    Referer = LastRequest.Url;
+                    referer = lastReq.Url;
 
             //Remove the "http://" part from the url
-            Url = Url.Replace("http://", "");
+            url = url.Replace("http://", "");
 
             //Parse for the server & page info
-            if (Url.Contains("/"))
+            if (url.Contains("/"))
             {
-                int i = Url.IndexOf("/");
-                Server = Url.Substring(0, i);
-                Page = Url.Substring(i, Url.Length - i);
+                int i = url.IndexOf("/");
+                server = url.Substring(0, i);
+                page = url.Substring(i, url.Length - i);
             }
             else
             {
-                Server = Url;
-                Page = "/";
+                server = url;
+                page = "/";
             }
 
             TcpClient HTTPClient = new TcpClient();
@@ -110,15 +136,15 @@ namespace BlueShift
             int Final_Port;
 
             //Proxy Support
-            if (string.IsNullOrEmpty(ProxyServer) || string.IsNullOrEmpty(ProxyPort) || UseProxy == false)
+            if (UseProxy)
             {
-                Final_Server = Server;
-                Final_Port = 80;
+                Final_Server = proxyServer;
+                Final_Port = proxyPort;
             }
             else
             {
-                Final_Server = ProxyServer;
-                Final_Port = int.Parse(ProxyPort);
+                Final_Server = server;
+                Final_Port = 80;
             }
 
             do
@@ -131,66 +157,60 @@ namespace BlueShift
                 {
                     Thread.Sleep(5000);
                 }
-            } while (Retry != 0 && !HTTPClient.Connected);
+            } while (retriesLeft != 0 && !HTTPClient.Connected);
 
             if (!HTTPClient.Connected)
             {
-                if (NewDataArrived != null) NewDataArrived(this, "Error: Could not connect to server.", BuildCookies());
-                return "";
+                throw new Exception("Error: Could not connect to server");
             }
 
             NetworkStream HTTPStream = HTTPClient.GetStream();
-            HTTPStream.WriteTimeout = HTTPStream.ReadTimeout = 15000; //15 Sec Timeout
+            HTTPStream.WriteTimeout = HTTPStream.ReadTimeout = DEFAULT_TIMEOUT; 
 
             try
             {
                 //Send the data
                 StreamWriter sw = new StreamWriter(HTTPStream);
-                LastRequest.DataSent = CreateHeader(Request, Server, Page, BuildCookies(), Referer, Data);
-                sw.Write(LastRequest.DataSent);
+                lastReq.DataSent = CreateHeader(request, server, page, cookies.BuildCookies(), referer, pData);
+                sw.Write(lastReq.DataSent);
                 sw.Flush();
 
                 //Capture all data
                 StreamReader sr = new StreamReader(HTTPStream, Encoding.Default);
-                Raw_Html = sr.ReadToEnd();
+                rawHTML = sr.ReadToEnd();
             }
             catch (Exception ex)
             {
-                if (NewDataArrived != null) NewDataArrived(this, "Error: Could not write/read from network stream. Original error: " + ex.Message, BuildCookies());
-                return "";
+                throw new Exception("Error: Could not write/read from network stream. Original error: " + ex.Message);
             }
 
             HTTPClient.Close();
 
-            if (string.IsNullOrEmpty(Raw_Html))
+            if (string.IsNullOrEmpty(rawHTML))
             {
-                if (NewDataArrived != null) NewDataArrived(this, "Error: Failed to recieve data from server.", BuildCookies());
-                return "";
+                throw new Exception("Error: Failed to recieve data from server.");
             }
 
-            int Separator = Raw_Html.IndexOf("\r\n\r\n") + 4;
-            LastRequest.HeaderReceived = Raw_Html.Substring(0, Separator);
-            LastRequest.RequestType = Request;
-            LastRequest.Url = "http://" + Url;
-            LastRequest.Data = Data;
-            LastRequest.Referer = Referer;
+            int Separator = rawHTML.IndexOf("\r\n\r\n") + 4;
+            lastReq.HeaderReceived = rawHTML.Substring(0, Separator);
+            lastReq.RequestType = request;
+            lastReq.Url = "http://" + url;
+            lastReq.Data = pData;
+            lastReq.Referer = referer;
 
-            WriteCookies(LastRequest.HeaderReceived);
+            cookies.WriteCookies(lastReq.HeaderReceived);
 
-            string Processed_Body = Raw_Html.Substring(Separator);
+            string processedBody = rawHTML.Substring(Separator);
 
-            if (LastRequest.HeaderReceived.Contains("Content-Encoding: gzip"))
-                Processed_Body = DecompressGZip(Processed_Body);
+            if (lastReq.HeaderReceived.Contains("Content-Encoding: gzip"))
+                processedBody = DecompressGZip(processedBody);
 
-            LastRequest.BodyRecieved = Processed_Body;
+            lastReq.BodyRecieved = processedBody;
 
-            //FIRE ZE MISSILES..oh..i mean ZE EVENTS!!
-            if (NewDataArrived != null) NewDataArrived(this, Processed_Body, BuildCookies());
-
-            if (ReturnHeader)
-                return string.Format("{0}{1}", LastRequest.HeaderReceived, Processed_Body);
+            if (returnHeader)
+                return string.Format("{0}{1}", lastReq.HeaderReceived, processedBody);
             else
-                return Processed_Body;
+                return processedBody;
         }
 
         string CreateHeader(string HTTPRequest, string Server, string Page, string Cookies, string Referer, string Data)
@@ -202,9 +222,9 @@ namespace BlueShift
               
             output.Append(string.Format("{0} {1} HTTP/1.1\r\nHost: {2}\r\n", HTTPRequest, Page, Server));
 
-            if (UseProxy && !string.IsNullOrEmpty(ProxyUsername) && !string.IsNullOrEmpty(ProxyPassword))
+            if (UseProxy && !string.IsNullOrEmpty(proxyUsername) && !string.IsNullOrEmpty(proxyPassword))
             {
-                string auth_string = base64Encode(string.Format("{0}:{1}", ProxyUsername, ProxyPassword));
+                string auth_string = base64Encode(string.Format("{0}:{1}", proxyUsername, proxyPassword));
                 output.Append(string.Format("Proxy-Authorization: Basic {0}\r\n", auth_string));
             }
 
@@ -233,38 +253,7 @@ namespace BlueShift
             return output.ToString();
         }
 
-        public void ClearCookies()
-        {
-            Cookies.Clear();
-        }
 
-        string BuildCookies()
-        {
-            StringBuilder output = new StringBuilder();
-            foreach (KeyValuePair<string, string> kvp in Cookies)
-                output.Append(string.Format("{0}={1};", kvp.Key , kvp.Value));
-            return output.ToString();
-        }
-
-        void WriteCookies(string hdr)
-        {
-            if (hdr.Contains("Set-Cookie: "))
-            {
-                string[] all_cookies = Utilities.GetBetweenAll("Set-Cookie: ", ";", hdr);
-                for (int i = 0; i <= all_cookies.GetUpperBound(0); i++)
-                {
-                    string[] parts = all_cookies[i].Split('=');
-                    if (Cookies.ContainsKey(parts[0]))
-                        if (parts[1] == "deleted")
-                            Cookies.Remove(parts[0]);
-                        else
-                            Cookies[parts[0]] = parts[1];
-                    else
-                        Cookies.Add(parts[0], parts[1]);
-                }
-            }
-        }
-        
         string DecompressGZip(string Compressed)
         {
             MemoryStream mStrm = new MemoryStream(Encoding.Default.GetBytes(Compressed));
